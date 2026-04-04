@@ -1,27 +1,48 @@
-name: Build macOS App
+name: Build macOS App (Auto-Fix)
 on:
-  workflow_dispatch: # 允许手动点击运行
+  workflow_dispatch:
 
 jobs:
   build:
-    runs-on: macos-latest # 使用 Mac 服务器
+    runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
-      
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1 # 只拉取最新的一层代码，速度快
+
+      - name: Check Files (Diagnostic)
+        run: |
+          echo "--- 当前目录下的文件有： ---"
+          ls -R
+          echo "--- 正在查找 pubspec.yaml 的位置： ---"
+          find . -name "pubspec.yaml"
+
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
           channel: 'stable'
+
+      - name: Install & Build
+        run: |
+          # 核心逻辑：自动跳转到包含 pubspec.yaml 的目录下执行
+          PUBSPEC_PATH=$(find . -name "pubspec.yaml" -print -quit)
+          if [ -z "$PUBSPEC_PATH" ]; then
+            echo "错误：在这个仓库里根本没找到 pubspec.yaml！请检查你的 Fork 是否完整。"
+            exit 1
+          fi
+          PROJECT_DIR=$(dirname "$PUBSPEC_PATH")
+          echo "找到项目根目录: $PROJECT_DIR"
+          cd "$PROJECT_DIR"
           
-      - name: Install dependencies
-        run: flutter pub get
-        
-      - name: Build macOS
-        # 仅编译，不进行代码签名（避免那个 encodedString 报错）
-        run: flutter build macos --release
-        
-      - name: Upload macOS Artifact
+          flutter pub get
+          # 开启 macOS 编译支持并打包
+          flutter config --enable-macos-desktop
+          flutter build macos --release --no-codesign
+
+      - name: Upload Result
         uses: actions/upload-artifact@v4
         with:
           name: Simple-Live-Mac
-          path: build/macos/Build/Products/Release/*.app
+          path: |
+            **/build/macos/Build/Products/Release/*.app
