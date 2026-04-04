@@ -1,6 +1,6 @@
-name: Build macOS App (Bypass Sign)
+name: Build macOS App (Final Version)
 on:
-  workflow_dispatch:
+  workflow_dispatch: # 允许手动点击运行
 
 jobs:
   build:
@@ -8,6 +8,8 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
@@ -16,25 +18,37 @@ jobs:
 
       - name: Configure and Build
         run: |
-          # 1. 定位主程序目录
+          # 1. 自动寻找包含 macos 配置的主程序目录
           APP_DIR=$(find . -name "macos" -type d -not -path "*/.*" | head -n 1 | xargs dirname)
+          if [ -z "$APP_DIR" ]; then
+            echo "错误：未找到 macOS 项目配置，请检查 Fork 是否完整。"
+            exit 1
+          fi
           echo "检测到主程序目录: $APP_DIR"
           cd "$APP_DIR"
-          
-          # 2. 【核心改动】直接修改 Xcode 配置文件，强行关闭签名检查
-          # 这样就不需要在 flutter build 命令后面带那串报错的参数了
+
+          # 2. 注入免签名配置 (解决原本报错的 encodedString 问题)
           echo "正在注入免签名配置..."
+          mkdir -p macos/Runner
           for config in macos/Runner/*.xcconfig; do
             echo "CODE_SIGNING_ALLOWED=NO" >> "$config"
             echo "CODE_SIGNING_REQUIRED=NO" >> "$config"
             echo "CODE_SIGN_IDENTITY=" >> "$config"
           done
 
-          # 3. 获取依赖并开启 macOS 支持
+          # 3. 修复 connectivity_plus 插件在 macOS 15 环境下的编译错误
+          # 将报错的 7.x 版本强制降级到稳定的 6.0.5
+          if [ -f "pubspec.yaml" ]; then
+            echo "正在修复插件版本冲突..."
+            sed -i '' 's/connectivity_plus: ^7.1.0/connectivity_plus: 6.0.5/g' pubspec.yaml
+            sed -i '' 's/connectivity_plus: 7.1.0/connectivity_plus: 6.0.5/g' pubspec.yaml
+          fi
+
+          # 4. 环境准备与编译
           flutter pub get
           flutter config --enable-macos-desktop
           
-          # 4. 执行编译 (这次只用最纯净的命令)
+          # 执行编译，不带任何容易产生歧义的参数
           flutter build macos --release
 
       - name: Upload Result
