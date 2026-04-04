@@ -1,6 +1,6 @@
-name: Build macOS App (Final Version)
+name: Build macOS App (Force Fix)
 on:
-  workflow_dispatch: # 允许手动点击运行
+  workflow_dispatch:
 
 jobs:
   build:
@@ -8,8 +8,6 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
@@ -18,37 +16,33 @@ jobs:
 
       - name: Configure and Build
         run: |
-          # 1. 自动寻找包含 macos 配置的主程序目录
+          # 1. 定位目录
           APP_DIR=$(find . -name "macos" -type d -not -path "*/.*" | head -n 1 | xargs dirname)
-          if [ -z "$APP_DIR" ]; then
-            echo "错误：未找到 macOS 项目配置，请检查 Fork 是否完整。"
-            exit 1
-          fi
           echo "检测到主程序目录: $APP_DIR"
           cd "$APP_DIR"
 
-          # 2. 注入免签名配置 (解决原本报错的 encodedString 问题)
+          # 2. 注入免签名配置
           echo "正在注入免签名配置..."
-          mkdir -p macos/Runner
           for config in macos/Runner/*.xcconfig; do
             echo "CODE_SIGNING_ALLOWED=NO" >> "$config"
             echo "CODE_SIGNING_REQUIRED=NO" >> "$config"
             echo "CODE_SIGN_IDENTITY=" >> "$config"
           done
 
-          # 3. 修复 connectivity_plus 插件在 macOS 15 环境下的编译错误
-          # 将报错的 7.x 版本强制降级到稳定的 6.0.5
-          if [ -f "pubspec.yaml" ]; then
-            echo "正在修复插件版本冲突..."
-            sed -i '' 's/connectivity_plus: ^7.1.0/connectivity_plus: 6.0.5/g' pubspec.yaml
-            sed -i '' 's/connectivity_plus: 7.1.0/connectivity_plus: 6.0.5/g' pubspec.yaml
-          fi
-
-          # 4. 环境准备与编译
+          # 3. 【核心修正】彻底封杀 connectivity_plus 7.x 版本
+          # 无论 pubspec.yaml 里怎么写的，我们强行把它改成 6.0.5
+          echo "正在强行降级插件版本..."
+          sed -i '' 's/connectivity_plus: .*/connectivity_plus: 6.0.5/g' pubspec.yaml
+          
+          # 4. 清理旧缓存并重新获取依赖
+          # 这一步很重要，防止旧的 7.1.0 残留
+          flutter pub clean
           flutter pub get
+          
+          # 5. 开启 macOS 支持并编译
           flutter config --enable-macos-desktop
           
-          # 执行编译，不带任何容易产生歧义的参数
+          # 强制跳过 Pods 签名并编译
           flutter build macos --release
 
       - name: Upload Result
