@@ -1,4 +1,4 @@
-name: Build macOS App (Auto-Fix)
+name: Build macOS App (Final Fix)
 on:
   workflow_dispatch:
 
@@ -8,41 +8,40 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 1 # 只拉取最新的一层代码，速度快
-
-      - name: Check Files (Diagnostic)
-        run: |
-          echo "--- 当前目录下的文件有： ---"
-          ls -R
-          echo "--- 正在查找 pubspec.yaml 的位置： ---"
-          find . -name "pubspec.yaml"
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
           channel: 'stable'
 
-      - name: Install & Build
+      - name: Locate App and Build
         run: |
-          # 核心逻辑：自动跳转到包含 pubspec.yaml 的目录下执行
-          PUBSPEC_PATH=$(find . -name "pubspec.yaml" -print -quit)
-          if [ -z "$PUBSPEC_PATH" ]; then
-            echo "错误：在这个仓库里根本没找到 pubspec.yaml！请检查你的 Fork 是否完整。"
+          # 1. 寻找真正包含 macos 配置的文件夹
+          # 我们不只是找 pubspec.yaml，我们要找的是旁边有 macos 目录的那个
+          APP_DIR=$(find . -name "macos" -type d -not -path "*/.*" | head -n 1 | xargs dirname)
+          
+          if [ -z "$APP_DIR" ]; then
+            echo "错误：没找到包含 macos 配置的文件夹！"
             exit 1
           fi
-          PROJECT_DIR=$(dirname "$PUBSPEC_PATH")
-          echo "找到项目根目录: $PROJECT_DIR"
-          cd "$PROJECT_DIR"
           
+          echo "检测到主程序目录: $APP_DIR"
+          cd "$APP_DIR"
+          
+          # 2. 获取依赖
           flutter pub get
-          # 开启 macOS 编译支持并打包
+          
+          # 3. 开启 macOS 支持
           flutter config --enable-macos-desktop
-          flutter build macos --release --no-codesign
+          
+          # 4. 执行编译（使用 Xcode 参数来跳过签名，而不是 --no-codesign）
+          # 这是绕过 "Could not find an option named --no-codesign" 的正确姿势
+          flutter build macos --release -- --xcode-arguments CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGNING_IDENTITY=""
 
       - name: Upload Result
         uses: actions/upload-artifact@v4
         with:
-          name: Simple-Live-Mac
+          name: Simple-Live-Mac-App
+          # 自动匹配编译出的 .app 文件
           path: |
             **/build/macos/Build/Products/Release/*.app
