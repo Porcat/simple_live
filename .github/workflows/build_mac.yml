@@ -1,4 +1,4 @@
-name: Build macOS App (Final Fix V2)
+name: Build macOS App (Bypass Sign)
 on:
   workflow_dispatch:
 
@@ -14,27 +14,32 @@ jobs:
         with:
           channel: 'stable'
 
-      - name: Locate App and Build
+      - name: Configure and Build
         run: |
-          # 1. 寻找包含 macos 配置的文件夹
+          # 1. 定位主程序目录
           APP_DIR=$(find . -name "macos" -type d -not -path "*/.*" | head -n 1 | xargs dirname)
           echo "检测到主程序目录: $APP_DIR"
           cd "$APP_DIR"
           
-          # 2. 获取依赖
+          # 2. 【核心改动】直接修改 Xcode 配置文件，强行关闭签名检查
+          # 这样就不需要在 flutter build 命令后面带那串报错的参数了
+          echo "正在注入免签名配置..."
+          for config in macos/Runner/*.xcconfig; do
+            echo "CODE_SIGNING_ALLOWED=NO" >> "$config"
+            echo "CODE_SIGNING_REQUIRED=NO" >> "$config"
+            echo "CODE_SIGN_IDENTITY=" >> "$config"
+          done
+
+          # 3. 获取依赖并开启 macOS 支持
           flutter pub get
-          
-          # 3. 开启 macOS 支持
           flutter config --enable-macos-desktop
           
-          # 4. 执行编译（注意：--release 后面必须要有一个空格，然后是两个横杠 --）
-          # 这次我们将参数写得更标准，防止它找错文件
-          flutter build macos --release -- --xcode-arguments CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGNING_IDENTITY="" GENERATE_INFOPLIST_FILE=YES
+          # 4. 执行编译 (这次只用最纯净的命令)
+          flutter build macos --release
 
       - name: Upload Result
         uses: actions/upload-artifact@v4
         with:
           name: Simple-Live-Mac-App
-          # 确保能抓取到生成的 .app
           path: |
             **/build/macos/Build/Products/Release/*.app
