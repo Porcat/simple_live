@@ -32,11 +32,16 @@ jobs:
       - name: Enable Flutter Desktop
         run: flutter config --enable-macos-desktop
 
-      - name: Restore packages and Fix dependencies
+      - name: Fix Android Config & Dependencies
         run: |
           cd simple_live_app
-          # 强行降级导致报错的插件版本
-          echo "Fixing connectivity_plus version..."
+          # 1. 伪造 Android 密钥配置文件，防止 gradle 报错
+          echo "storePassword=dummy" > android/key.properties
+          echo "keyPassword=dummy" >> android/key.properties
+          echo "keyAlias=dummy" >> android/key.properties
+          echo "storeFile=dummy" >> android/key.properties
+          
+          # 2. 强行降级导致报错的插件版本 (macOS 专用语法)
           sed -i '' 's/connectivity_plus:.*/connectivity_plus: 6.0.5/g' pubspec.yaml
           flutter pub get
 
@@ -48,16 +53,8 @@ jobs:
       - name: Build APK (Debug/Unsigned)
         run: |
           cd simple_live_app
+          # 使用 debug 模式，彻底避开签名逻辑
           flutter build apk --debug --split-per-abi
-
-      - name: Build IPA (No Sign)
-        run: |
-          cd simple_live_app
-          flutter build ios --release --no-codesign
-          mkdir -p build/ios/iphoneos/Payload
-          cp -R build/ios/iphoneos/Runner.app build/ios/iphoneos/Payload/Runner.app
-          cd build/ios/iphoneos/
-          zip -q -r ios_no_sign.ipa Payload
 
       - name: Build MacOS (No Sign)
         run: |
@@ -68,17 +65,15 @@ jobs:
             echo "CODE_SIGNING_REQUIRED=NO" >> "$config"
             echo "CODE_SIGN_IDENTITY=" >> "$config"
           done
-          # 使用 distributor 打包
-          export PATH="$PATH":"$HOME/.pub-cache/bin"
-          flutter_distributor package --platform macos --targets dmg,zip --skip-clean
+          # 使用更稳妥的运行方式
+          dart pub global run flutter_distributor package --platform macos --targets dmg,zip --skip-clean
 
       - name: Upload Artifacts (Mobile & Mac)
         uses: actions/upload-artifact@v4
         with:
-          name: mobile-and-mac-builds
+          name: mac-and-android-builds
           path: |
             simple_live_app/build/app/outputs/flutter-apk/*.apk
-            simple_live_app/build/ios/iphoneos/ios_no_sign.ipa
             simple_live_app/build/dist/*/*.dmg
             simple_live_app/build/dist/*/*.zip
 
@@ -101,11 +96,12 @@ jobs:
       - name: Build Linux
         run: |
           cd simple_live_app
+          # Linux 版本的 sed 语法
+          sed -i 's/connectivity_plus:.*/connectivity_plus: 6.0.5/g' pubspec.yaml
           flutter config --enable-linux-desktop
           flutter pub get
           dart pub global activate flutter_distributor
-          export PATH="$PATH":"$HOME/.cache/dart-sdk/bin":"$HOME/.pub-cache/bin"
-          flutter_distributor package --platform linux --targets deb,zip --skip-clean
+          dart pub global run flutter_distributor package --platform linux --targets deb,zip --skip-clean
       - name: Upload Linux Artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -130,12 +126,13 @@ jobs:
         shell: bash
         run: |
           cd simple_live_app
+          # Windows(Git Bash) 版本的 sed 语法
+          sed -i 's/connectivity_plus:.*/connectivity_plus: 6.0.5/g' pubspec.yaml
           flutter config --enable-windows-desktop
           flutter pub get
           dart pub global activate flutter_distributor
-          # Windows 下的路径处理
-          export PATH="$PATH":"$APPDATA/Pub/Cache/bin"
-          flutter_distributor package --platform windows --targets zip --skip-clean
+          # 使用 dart pub global run 避开路径问题
+          dart pub global run flutter_distributor package --platform windows --targets zip --skip-clean
       - name: Upload Windows Artifacts
         uses: actions/upload-artifact@v4
         with:
