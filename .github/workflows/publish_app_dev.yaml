@@ -42,15 +42,8 @@ jobs:
           sed -i '' 's/connectivity_plus:.*/connectivity_plus: 6.0.5/g' pubspec.yaml
           flutter pub get
 
-      - name: Install Tools (Local Strategy)
-        run: |
-          # 在根目录本地安装 appdmg，避开全局路径和权限问题
-          npm install appdmg
-          # 将本地 node_modules 的 bin 目录加入临时环境变量
-          echo "$(pwd)/node_modules/.bin" >> $GITHUB_PATH
-          
-          # 安装 distributor
-          dart pub global activate flutter_distributor
+      - name: Install Distributor
+        run: dart pub global activate flutter_distributor
 
       - name: Build APK (Debug/Unsigned)
         run: |
@@ -60,17 +53,27 @@ jobs:
       - name: Build MacOS (No Sign)
         run: |
           cd simple_live_app
-          # 注入免签名配置
+          # 1. 注入免签名配置
           for config in macos/Runner/*.xcconfig; do
             echo "CODE_SIGNING_ALLOWED=NO" >> "$config"
             echo "CODE_SIGNING_REQUIRED=NO" >> "$config"
             echo "CODE_SIGN_IDENTITY=" >> "$config"
           done
           
-          # 确保环境变量包含本地安装的 appdmg 和 dart bin
-          export PATH="$PATH:$(pwd)/../node_modules/.bin:$HOME/.pub-cache/bin"
+          # 2. 【核心修复】创建系统级全局代理脚本
+          # 先在当前目录安装真正的 appdmg
+          npm install appdmg
           
-          # 运行打包
+          # 写一个 Bash 脚本到 /usr/local/bin/appdmg
+          echo '#!/bin/bash' | sudo tee /usr/local/bin/appdmg
+          echo "$(pwd)/node_modules/.bin/appdmg \"\$@\"" | sudo tee -a /usr/local/bin/appdmg
+          sudo chmod +x /usr/local/bin/appdmg
+          
+          # 验证我们的木马脚本是否生效 (模拟底层 shell 调用)
+          /bin/sh -c "appdmg --version"
+          
+          # 3. 运行打包
+          export PATH="$PATH:$HOME/.pub-cache/bin"
           dart pub global run flutter_distributor:main package --platform macos --targets dmg,zip --skip-clean
 
       - name: Upload Artifacts (Mobile & Mac)
