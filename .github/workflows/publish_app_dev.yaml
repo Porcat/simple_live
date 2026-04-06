@@ -1,120 +1,144 @@
-name: app-build-action-dev
+name: app-build-action-dev-MODIFIED
 
 on:
-  workflow_dispatch: # 允许手动点击运行
+  workflow_dispatch:
   push:
     tags:
       - "dev_v*"
 
 jobs:
-  # 打包Android、iOS、Mac
+  # 第一部分：打包 Android、iOS、macOS
   build-mac-ios-android:
     runs-on: macos-latest
-
     permissions:
       contents: write
-
     steps:
-      # 1. 签出代码
       - uses: actions/checkout@v4
         with:
           ref: dev
 
-      # --- 删除了原本报错的 Android Keystore 下载和 key.properties 创建步骤 ---
-
-      # 2. 设置 JAVA 环境
       - uses: actions/setup-java@v4
         with:
           distribution: "zulu"
           java-version: "17"
           cache: "gradle"
 
-      # 3. 设置 Flutter
-      - name: Flutter action
+      - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          channel: 'stable' # 使用稳定版，避免版本号硬编码错误
+          channel: 'stable'
           cache: true
 
-      # 4. 打开 MAC Desktop 支持
       - name: Enable Flutter Desktop
         run: flutter config --enable-macos-desktop
 
-      # 5. 更新 Packages 并修复插件冲突
-      - name: Restore packages
+      - name: Restore packages and Fix dependencies
         run: |
           cd simple_live_app
-          # 【核心修复】强制降级导致 macOS 15 报错的插件版本
-          echo "正在修复插件版本冲突..."
+          # 强行降级导致报错的插件版本
+          echo "Fixing connectivity_plus version..."
           sed -i '' 's/connectivity_plus:.*/connectivity_plus: 6.0.5/g' pubspec.yaml
           flutter pub get
 
-      # 6. 安装打包工具
-      - name: Install appdmg
-        run: npm install -g appdmg
+      - name: Install Tools
+        run: |
+          npm install -g appdmg
+          dart pub global activate flutter_distributor
 
-      - name: Install flutter_distributor
-        run: dart pub global activate flutter_distributor
-
-      # 7. 打包 APK (改为 debug 模式以跳过签名校验，确保能出包)
-      - name: Build APK
+      - name: Build APK (Debug/Unsigned)
         run: |
           cd simple_live_app
           flutter build apk --debug --split-per-abi
 
-      # 8. 上传 APK
-      - name: Upload APK to Artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: android-debug-packets
-          path: simple_live_app/build/app/outputs/flutter-apk/*.apk
-
-      # 9. 打包 iOS (无签名)
-      - name: Build IPA
+      - name: Build IPA (No Sign)
         run: |
           cd simple_live_app
           flutter build ios --release --no-codesign
-
-      # 10. 创建未签名 ipa
-      - name: Create IPA
-        run: |
-          cd simple_live_app
           mkdir -p build/ios/iphoneos/Payload
           cp -R build/ios/iphoneos/Runner.app build/ios/iphoneos/Payload/Runner.app
           cd build/ios/iphoneos/
           zip -q -r ios_no_sign.ipa Payload
-          cd ../../..
 
-      # 11. 上传 IPA
-      - name: Upload IPA to Artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: ios-no-sign
-          path: simple_live_app/build/ios/iphoneos/ios_no_sign.ipa
-
-      # 12. 打包 MAC (核心：注入免签名配置)
-      - name: Build MacOS
+      - name: Build MacOS (No Sign)
         run: |
           cd simple_live_app
-          echo "正在注入 macOS 免签名配置..."
+          # 注入免签名配置
           for config in macos/Runner/*.xcconfig; do
             echo "CODE_SIGNING_ALLOWED=NO" >> "$config"
             echo "CODE_SIGNING_REQUIRED=NO" >> "$config"
             echo "CODE_SIGN_IDENTITY=" >> "$config"
           done
-          # 将 flutter_distributor 加入路径并运行
+          # 使用 distributor 打包
           export PATH="$PATH":"$HOME/.pub-cache/bin"
           flutter_distributor package --platform macos --targets dmg,zip --skip-clean
 
-      # 13. 上传 MAC
-      - name: Upload MacOS to Artifacts
+      - name: Upload Artifacts (Mobile & Mac)
         uses: actions/upload-artifact@v4
         with:
-          name: mac-dist
+          name: mobile-and-mac-builds
           path: |
+            simple_live_app/build/app/outputs/flutter-apk/*.apk
+            simple_live_app/build/ios/iphoneos/ios_no_sign.ipa
             simple_live_app/build/dist/*/*.dmg
             simple_live_app/build/dist/*/*.zip
 
-      - run: echo "🍏 Job status: ${{ job.status }}."
+  # 第二部分：打包 Linux
+  build-linux:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: dev
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+      - name: Install Linux Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev libasound2-dev libmpv-dev mpv
+      - name: Build Linux
+        run: |
+          cd simple_live_app
+          flutter config --enable-linux-desktop
+          flutter pub get
+          dart pub global activate flutter_distributor
+          export PATH="$PATH":"$HOME/.cache/dart-sdk/bin":"$HOME/.pub-cache/bin"
+          flutter_distributor package --platform linux --targets deb,zip --skip-clean
+      - name: Upload Linux Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-builds
+          path: |
+            simple_live_app/build/dist/*/*.deb
+            simple_live_app/build/dist/*/*.zip
 
-  # --- Linux 和 Windows 保持原样或按需修改 ---
+  # 第三部分：打包 Windows
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: dev
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+      - name: Build Windows
+        shell: bash
+        run: |
+          cd simple_live_app
+          flutter config --enable-windows-desktop
+          flutter pub get
+          dart pub global activate flutter_distributor
+          # Windows 下的路径处理
+          export PATH="$PATH":"$APPDATA/Pub/Cache/bin"
+          flutter_distributor package --platform windows --targets zip --skip-clean
+      - name: Upload Windows Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-builds
+          path: |
+            simple_live_app/build/dist/*/*.zip
