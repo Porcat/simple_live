@@ -7,7 +7,7 @@ on:
       - "dev_v*"
 
 jobs:
-  # 第一部分：打包 Android、iOS、macOS
+ # 第一部分：打包 Android、iOS、macOS
   build-mac-ios-android:
     runs-on: macos-latest
     permissions:
@@ -35,15 +35,18 @@ jobs:
       - name: Fix Android Config & Dependencies
         run: |
           cd simple_live_app
-          # 1. 伪造 Android 密钥配置文件
           echo "storePassword=dummy" > android/key.properties
           echo "keyPassword=dummy" >> android/key.properties
           echo "keyAlias=dummy" >> android/key.properties
           echo "storeFile=dummy" >> android/key.properties
-          
-          # 2. 强行降级插件版本 (macOS 专用语法)
           sed -i '' 's/connectivity_plus:.*/connectivity_plus: 6.0.5/g' pubspec.yaml
           flutter pub get
+
+      - name: Install Tools
+        run: |
+          # 使用 sudo 安装确保权限，并强制链接
+          sudo npm install -g appdmg --unsafe-perm
+          dart pub global activate flutter_distributor
 
       - name: Build APK (Debug/Unsigned)
         run: |
@@ -59,8 +62,11 @@ jobs:
             echo "CODE_SIGNING_REQUIRED=NO" >> "$config"
             echo "CODE_SIGN_IDENTITY=" >> "$config"
           done
-          # 重新激活并使用正确的入口运行
-          dart pub global activate flutter_distributor
+          
+          # 【核心修复】手动将 npm 全局路径和 pub 路径加入 PATH
+          export PATH="$PATH:$(npm config get prefix)/bin:$HOME/.pub-cache/bin"
+          
+          # 运行打包
           dart pub global run flutter_distributor:main package --platform macos --targets dmg,zip --skip-clean
 
       - name: Upload Artifacts (Mobile & Mac)
