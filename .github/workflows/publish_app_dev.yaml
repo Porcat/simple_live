@@ -7,7 +7,7 @@ on:
       - "dev_v*"
 
 jobs:
- # 第一部分：打包 Android、iOS、macOS
+# 第一部分：打包 Android、iOS、macOS
   build-mac-ios-android:
     runs-on: macos-latest
     permissions:
@@ -44,8 +44,14 @@ jobs:
 
       - name: Install Tools
         run: |
-          # 使用 sudo 安装确保权限，并强制链接
+          # 1. 安装 appdmg
           sudo npm install -g appdmg --unsafe-perm
+          
+          # 2. 【核心修复】强制创建系统级软链接，确保无论在哪都能找到 appdmg
+          APPDMG_PATH=$(which appdmg || npm config get prefix)/bin/appdmg
+          sudo ln -sf "$APPDMG_PATH" /usr/local/bin/appdmg
+          
+          # 3. 安装 distributor
           dart pub global activate flutter_distributor
 
       - name: Build APK (Debug/Unsigned)
@@ -63,10 +69,10 @@ jobs:
             echo "CODE_SIGN_IDENTITY=" >> "$config"
           done
           
-          # 【核心修复】手动将 npm 全局路径和 pub 路径加入 PATH
-          export PATH="$PATH:$(npm config get prefix)/bin:$HOME/.pub-cache/bin"
+          # 确保 pub 的路径也在
+          export PATH="$PATH:$HOME/.pub-cache/bin"
           
-          # 运行打包
+          # 再次尝试打包
           dart pub global run flutter_distributor:main package --platform macos --targets dmg,zip --skip-clean
 
       - name: Upload Artifacts (Mobile & Mac)
