@@ -1,4 +1,4 @@
-name: app-build-action-dev-MODIFIED
+name: build-mac-ios-android-MODIFIED
 
 on:
   workflow_dispatch: # 允许手动点击运行
