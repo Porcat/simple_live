@@ -35,25 +35,19 @@ jobs:
       - name: Fix Android Config & Dependencies
         run: |
           cd simple_live_app
-          # 1. 伪造 Android 密钥配置文件，防止 gradle 报错
+          # 1. 伪造 Android 密钥配置文件
           echo "storePassword=dummy" > android/key.properties
           echo "keyPassword=dummy" >> android/key.properties
           echo "keyAlias=dummy" >> android/key.properties
           echo "storeFile=dummy" >> android/key.properties
           
-          # 2. 强行降级导致报错的插件版本 (macOS 专用语法)
+          # 2. 强行降级插件版本 (macOS 专用语法)
           sed -i '' 's/connectivity_plus:.*/connectivity_plus: 6.0.5/g' pubspec.yaml
           flutter pub get
-
-      - name: Install Tools
-        run: |
-          npm install -g appdmg
-          dart pub global activate flutter_distributor
 
       - name: Build APK (Debug/Unsigned)
         run: |
           cd simple_live_app
-          # 使用 debug 模式，彻底避开签名逻辑
           flutter build apk --debug --split-per-abi
 
       - name: Build MacOS (No Sign)
@@ -65,8 +59,9 @@ jobs:
             echo "CODE_SIGNING_REQUIRED=NO" >> "$config"
             echo "CODE_SIGN_IDENTITY=" >> "$config"
           done
-          # 使用更稳妥的运行方式
-          dart pub global run flutter_distributor package --platform macos --targets dmg,zip --skip-clean
+          # 重新激活并使用正确的入口运行
+          dart pub global activate flutter_distributor
+          dart pub global run flutter_distributor:main package --platform macos --targets dmg,zip --skip-clean
 
       - name: Upload Artifacts (Mobile & Mac)
         uses: actions/upload-artifact@v4
@@ -101,7 +96,8 @@ jobs:
           flutter config --enable-linux-desktop
           flutter pub get
           dart pub global activate flutter_distributor
-          dart pub global run flutter_distributor package --platform linux --targets deb,zip --skip-clean
+          # 关键修正：加入 :main
+          dart pub global run flutter_distributor:main package --platform linux --targets deb,zip --skip-clean
       - name: Upload Linux Artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -131,8 +127,8 @@ jobs:
           flutter config --enable-windows-desktop
           flutter pub get
           dart pub global activate flutter_distributor
-          # 使用 dart pub global run 避开路径问题
-          dart pub global run flutter_distributor package --platform windows --targets zip --skip-clean
+          # 关键修正：加入 :main
+          dart pub global run flutter_distributor:main package --platform windows --targets zip --skip-clean
       - name: Upload Windows Artifacts
         uses: actions/upload-artifact@v4
         with:
